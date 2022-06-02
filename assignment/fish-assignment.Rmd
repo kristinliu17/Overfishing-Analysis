@@ -1,0 +1,188 @@
+---
+output: 
+  github_document:
+    df_print: tibble
+---
+
+```{r setup, message = FALSE}
+library(tidyverse)
+library(contentid)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+```
+
+# Unit 2: Fisheries Collapse Module
+
+This module will focus on understanding and replicating fisheries stock assessment data and fisheries collapse.
+
+Instead of working with independent data.frames, we will be working with a large relational database which contains many different tables of different sizes and shapes, but that all all related to each other through a series of different ids.
+
+## The Database
+
+We will use data from the [RAM Legacy Stock Assessment Database](https://www.ramlegacy.org/database/)
+
+# Exercise 1: Investigating the North-Atlantic Cod
+
+Now we are ready to dive into our data. First, We seek to replicate the following figure from the Millennium Ecosystem Assessment Project using the RAM data.
+
+![](http://espm-157.carlboettiger.info/img/cod.jpg)
+
+```{r}
+zip <- resolve("hash://md5/688d450bfd59849e0522c3c5e18d1b66", store=TRUE)
+
+dest <- tempfile()
+unzip(zip, exdir = dest)
+load(fs::dir_ls(file.path(dest, "R Data"), glob="*.RData"))
+```
+
+```{r}
+ts <- timeseries %>% as_tibble()
+
+fish <- ts %>%
+  left_join(stock, bu = 'stockid') %>%
+  left_join(area, by = 'areaid') %>%
+  left_join(tsmetrics, by = c('tsid' = 'tsunique'))
+  
+## left_join is saying you are joining to the table being piped
+```
+
+```{r}
+cod <- fish %>% 
+	select(stockid, areaid, tsyear, tsvalue, tsid, commonname, scientificname, country, areaname) %>%
+  filter(commonname == 'Atlantic cod', tsid == 'TCbest-MT') %>%
+  distinct()
+
+cod %>% count(areaname)
+
+cod_totals <- cod %>%
+  filter(areaname == 'Southern Labrador-Eastern Newfoundland') %>%
+  group_by(tsyear) %>% summarize(total_catch = sum(tsvalue, na.rm = TRUE))
+
+```
+
+
+## placeholder
+
+```{r}
+cod_totals %>% ggplot(aes(tsyear, total_catch)) + geom_point() + geom_line()
+```
+
+The fish landing data increased exponentially in the latter half of the 20th century because of the internationalization of fishing. With more data being collected, more fisheries from around the world increased their number of stocks. However, the drop in the amount of Atlantic cod at the end reflects a lag in the collection of data, as there must be time between when the data is collected and when it is actually recorded and inputted. 
+
+The data provided by the RAM Legacy Stock Assessment Database and the data we produced follow the same trend, however there was a discrepancy between our fish landing values. The discrepancy between  the highest fish landings in tons recorded on our graph (nearly 2.5 million) compared to the original data with the highest recorded fish landings in tons of 900,000 can be explained through a couple of different reasons. First, the original assessment’s data may not have accounted for all of the catches recorded. Second, the Newfoundland area indicated within their data may have been a smaller subset of the Newfoundland area that we filtered for within our dataset to create the graph.
+
+------------------------------------------------------------------------
+
+# Exercise 2: Group Assignment
+
+## Stock Collapses
+
+We seek to replicate the temporal trend in stock declines shown in [Worm et al 2006](http://doi.org/10.1126/science.1132294):
+
+![](http://espm-157.carlboettiger.info/img/worm2006.jpg)
+```{r}
+cod_totals %>% mutate(collapsed = (total_catch < .10 * cummax(total_catch)) )
+
+fish_tc <- fish %>% 
+  select(stockid, areaid, tsyear, tsvalue, tsid, commonname, scientificname, country, areaname) %>%
+  filter(tsid == 'TCbest-MT') %>%
+  distinct()
+
+fish_collapse <- fish_tc %>% 
+  filter(tsyear >= 1950 & tsyear <= 2006) %>%
+  group_by(tsyear) %>%
+  summarize(total_catch = sum(tsvalue, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(collapsed = (total_catch < .10 * cummax(total_catch)), cummax = 0.1 * cummax(total_catch)) %>% 
+  mutate(percent_collapsed = total_catch/max(total_catch) * 100) %>%
+  mutate(diff = total_catch - lag(total_catch, default = first(total_catch))) %>%
+  mutate(diff_percentage = abs(diff)/total_catch * 100) 
+
+black_diamonds_yearly <- fish_collapse %>% ggplot(aes(tsyear, diff_percentage)) + geom_point(shape=18) + scale_y_reverse()
+black_diamonds_yearly
+
+black_triangles <- fish_collapse %>% ggplot(aes(tsyear, percent_collapsed)) + geom_point(shape=17) + scale_y_reverse()
+black_triangles
+
+```
+Black Diamonds (By year collapse)
+In our first graph (indicated by the black diamonds), we show the stock collapse by year between 1950 up to the year the report was published. Instead of mirroring the downward trend that is shown in the original graph, we instead took the maximum catches each year in order to graph the trend of stock collapse. We felt this would better represent the number of collapses, because when we attempted to graph the stock collapse using the average of each year’s catches (instead of the maximum), the previous years’ catch would be over 100% on the graph. This is because the number of fisheries increases throughout the years, and thus the number of catches would increase each year and skew the previous years’ results. 
+ 
+Black Triangles (Cumulative collapse)
+In our second graph (indicated by the black triangles), we show the cumulative stock collapse by year between 1950 up to the year the report was published. This graph reflects the downward trend shown in the original graph, as the percent of collapse of stock catches goes down as more fisheries are established and the number of catches increases. This graph represents all the species catches, without filtering between rich or poor species. This graph demonstrates that overall, the catches throughout the years have consistently increased over time, as more fisheries have been established and overfishing continues to be a problem due to increasing demand around the world. One difference between our graph and the original graph is the fact that the percent collapse does not start at 0, which may be explained by inaccurate data reporting in the 1950s.
+
+
+```{r}
+fish_count <- 
+  fish %>% count(commonname)
+
+species_poor <- fish_count %>%
+  filter(n <= 500)
+
+species_poor_count <- left_join(species_poor, fish_tc, by = "commonname") %>%
+  filter(tsyear >= 1950 & tsyear <= 2006) %>%
+  group_by(tsyear) %>%
+  summarize(total_catch = sum(tsvalue, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(collapsed = (total_catch < .10 * cummax(total_catch)), cummax = 0.1 * cummax(total_catch)) %>% 
+  mutate(percent_collapsed_poor = total_catch/(max(total_catch)) * 100) %>%
+  mutate(diff = total_catch - lag(total_catch, default = first(total_catch))) %>%
+  mutate(diff_percentage = abs(diff)/total_catch * 100) 
+
+species_poor_cum_collapse <- ggplot(species_poor_count, aes(x = tsyear)) + 
+  geom_point(aes(y = percent_collapsed_poor), color = "blue", shape=17) +
+  scale_y_reverse()
+species_poor_cum_collapse
+
+species_poor_yr_collapse <- ggplot(species_poor_count, aes(x = tsyear)) + 
+  geom_point(aes(y = diff_percentage), color = "blue", shape=18) +
+  scale_y_reverse()
+species_poor_yr_collapse
+```
+Blue Diamonds (by year species poor)
+In the blue diamonds graph (indicated by the blue triangles), we show less cumulative stock collapse over time in the species poor taxa. We see that it does not fluctuate as much as the other graphs depicting year collapse. We recognize that this does not match the published results which actually show that collapses of fisheries occurred at a higher rate in species-poor ecosystems, as compared with species-rich ones. We believe this to be due to the fact that we calculated our Y-axis  differently than the published results. We found our Y-axis by using the absolute value of the difference between the previous year’s catches and the current year’s; we then divided that value by the total catch for the year and multiplied by 100 to get the percentage of collapsed taxa. Since the exact methods of calculating the exact percent taxa of the published results for the blue diamonds were not defined, this is how we hypothesized that the percentage was calculated. 
+
+
+Blue Triangles (cumulative species poor) 
+The blue triangles graph depicts the cumulative stock collapse of the species-poor ecosystems. The graph shows a less-steep decline in percent collapse between the years 1950 and 1990 compared to the steep decline of the red triangles and the black triangles graphs. We hypothesize that this is due to the fact that the species-poor ecosystems have less catch data to a smaller amount of species to draw from, resulting in a change in catch rate that is not as significant as the decline in catch rate of species-rich catches. In addition, there is a significant drop in 1990 in the drop rate, which may be a result of a lag in data collection during that time, which may have resulted in a larger decline than there actually was. In other words, researchers may not have accounted for the drops in previous years due to data collection lag, which caused the previous years’ collapse to seem less steep, while causing the drop in 1990 to seem more extreme.
+
+
+
+```{r}
+species_rich <- fish_count %>%
+  filter(n > 500)
+
+species_rich_count <- left_join(species_rich, fish_tc, by = "commonname") %>%
+  filter(tsyear >= 1950 & tsyear <= 2006) %>%
+  group_by(tsyear) %>%
+  summarize(total_catch = sum(tsvalue, na.rm = TRUE), .groups = 'drop') %>%
+  mutate(collapsed = (total_catch < .10 * cummax(total_catch)), cummax = 0.1 * cummax(total_catch)) %>% 
+  mutate(percent_collapsed_rich = total_catch/(max(total_catch)) * 100) %>%
+  mutate(diff = total_catch - lag(total_catch, default = first(total_catch))) %>%
+  mutate(diff_percentage = abs(diff)/total_catch * 100) 
+
+species_rich_cum_collapse <- ggplot(species_rich_count, aes(x = tsyear)) + 
+  geom_point(aes(y = percent_collapsed_rich), color = "red", shape=17) +
+  scale_y_reverse()
+species_rich_cum_collapse
+
+species_rich_yr_collapse <- ggplot(species_rich_count, aes(x = tsyear)) + 
+  geom_point(aes(y = diff_percentage), color = "red", shape=18) +
+  scale_y_reverse()
+species_rich_yr_collapse
+```
+
+Red Diamonds (by year species rich)
+The red diamonds graph depicts the percent collapse of the species-rich ecosystems by year from 1950 up to 2006. The graph greatly resembles that of the black diamonds because the species-rich ecosystems take up a larger portion and influence on the catch of all species. We obtained the data by obtaining the absolute value of the difference in catch between a specific year and the previous year and dividing that by the total catch of the specified year for every year in our data and multiplying that value by 100 to obtain the percentage of collapsed taxa. Because the exact methods of calculating the exact percent taxa of the published results for the red diamonds were not defined, this is how we hypothesized that the percentage was calculated.
+
+Red triangles (cumulative species rich)
+The red triangles graph depicts the cumulative stock collapse of the species-rich ecosystems between the years 1950 and 2006. The graph greatly resembles that of the black triangles because the species-rich ecosystems take up a larger portion and influence the catch of all species. And so, it also reflects the downward trend shown in the original graph, signifying that the increase in catches overtime causes the increase in percentage of collapsed taxa.
+
+
+```{r}
+diamonds <- ggarrange(black_diamonds_yearly, species_poor_yr_collapse, species_rich_yr_collapse)
+diamonds
+
+triangles <- ggarrange(black_triangles,species_poor_cum_collapse,species_rich_cum_collapse)
+triangles
+```
+

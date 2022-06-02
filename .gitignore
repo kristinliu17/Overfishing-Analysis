@@ -1,0 +1,29 @@
+# Private R session data
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+.Rbuildignore
+.Renviron
+
+## large data / binary files
+*.zip
+*.csv
+*.rds
+*.RData
+*.gz
+*.xlsx
+*.docx
+*.pdf
+
+# Temporary files created by R markdown
+*.utf8.md
+*.knit.md
+
+
+# template proj
+fish-template.Rproj
+*.Rproj
+
+# OS-specific
+.DStore
